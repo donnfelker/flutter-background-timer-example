@@ -4,6 +4,8 @@ A simple timer based upon the `flutter_background_service` example that starts a
 
 This runs as a foreground service and shows a persistent notification while the timer is running. 
 
+FYI - Only tested on Android at this point. Not sure if iOS works yet.
+
 ## Getting Started
 
  - Clone
