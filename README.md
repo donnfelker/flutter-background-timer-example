@@ -1,16 +1,14 @@
 # timer_background
 
-A new Flutter project.
+A simple timer based upon the `flutter_background_service` example that starts a periodic timer that executes every second in the background.
+
+This runs as a foreground service and shows a persistent notification while the timer is running. 
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+ - Clone
+ - `flutter run`
+ - Once app is installed you will need to give it permissions. Go into the app info of the app and give it permissions manually (permission requetss are not built into this demo).
+ - Kill app
+ - `flutter run` 
+ - View app running with notification when background service is running. 
