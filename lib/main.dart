@@ -90,83 +90,88 @@ Future<bool> onIosBackground(ServiceInstance service) async {
 
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
-  // Only available for flutter 3.0.0 and later
   DartPluginRegistrant.ensureInitialized();
 
-  // For flutter prior to version 3.0.0
-  // We have to register the plugin manually
-
-  SharedPreferences preferences = await SharedPreferences.getInstance();
-  await preferences.setString("hello", "world");
-
-  /// OPTIONAL when use custom notification
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
+
+  // Initialize the notification plugin
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const InitializationSettings initializationSettings =
+      InitializationSettings(android: initializationSettingsAndroid);
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+  // Create a notification channel for Android
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'my_foreground',
+    'MY FOREGROUND SERVICE',
+    description: 'This channel is used for important notifications.',
+    importance: Importance.low,
+    playSound: false,
+  );
+
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
 
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
       service.setAsForegroundService();
     });
-
     service.on('setAsBackground').listen((event) {
       service.setAsBackgroundService();
     });
   }
-
   service.on('stopService').listen((event) {
     service.stopSelf();
   });
 
-  // bring to foreground
+  // Show the initial notification
+  await _showNotification(
+      flutterLocalNotificationsPlugin, channel, 'Service started');
+
+  // Update the notification every second
   Timer.periodic(const Duration(seconds: 1), (timer) async {
     if (service is AndroidServiceInstance) {
       if (await service.isForegroundService()) {
-        /// OPTIONAL for use custom notification
-        /// the notification id must be equals with AndroidConfiguration when you call configure() method.
-        flutterLocalNotificationsPlugin.show(
-          888,
-          'COOL SERVICE',
-          'Awesome ${DateTime.now()}',
-          const NotificationDetails(
-            android: AndroidNotificationDetails(
-              'my_foreground',
-              'MY FOREGROUND SERVICE',
-              icon: 'ic_launcher',
-              ongoing: true,
-            ),
-          ),
-        );
-
-        // if you don't using custom notification, uncomment this
-        service.setForegroundNotificationInfo(
-          title: "My App Service",
-          content: "Updated at ${DateTime.now()}",
-        );
+        await _showNotification(flutterLocalNotificationsPlugin, channel,
+            'Updated at ${DateTime.now().toString()}');
       }
     }
 
-    /// you can see this log in logcat
     debugPrint('FLUTTER BACKGROUND SERVICE: ${DateTime.now()}');
-
-    // test using external plugin
-    final deviceInfo = DeviceInfoPlugin();
-    String? device;
-    if (Platform.isAndroid) {
-      final androidInfo = await deviceInfo.androidInfo;
-      device = androidInfo.model;
-    } else if (Platform.isIOS) {
-      final iosInfo = await deviceInfo.iosInfo;
-      device = iosInfo.model;
-    }
 
     service.invoke(
       'update',
       {
         "current_date": DateTime.now().toIso8601String(),
-        "device": device,
       },
     );
   });
+}
+
+Future<void> _showNotification(
+    FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin,
+    AndroidNotificationChannel channel,
+    String content) async {
+  await flutterLocalNotificationsPlugin.show(
+    888,
+    'My Timer',
+    content,
+    NotificationDetails(
+      android: AndroidNotificationDetails(
+        channel.id,
+        channel.name,
+        channelDescription: channel.description,
+        icon: '@mipmap/ic_launcher',
+        ongoing: true,
+        playSound: false,
+        enableVibration: false,
+      ),
+    ),
+  );
 }
 
 class MyApp extends StatefulWidget {
@@ -183,7 +188,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(
-          title: const Text('Service App'),
+          title: const Text('Background Timer Example'),
         ),
         body: Column(
           children: [
