@@ -8,6 +8,9 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeService();
@@ -17,62 +20,77 @@ Future<void> main() async {
 Future<void> initializeService() async {
   final service = FlutterBackgroundService();
 
-  /// OPTIONAL, using custom notification channel id
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'my_foreground', // id
-    'MY FOREGROUND SERVICE', // title
-    description:
-        'This channel is used for important notifications.', // description
-    importance: Importance.high, // importance must be at low or higher level
+    'my_foreground',
+    'MY FOREGROUND SERVICE',
+    description: 'This channel is used for important notifications.',
+    importance: Importance.high,
   );
 
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+  final DarwinInitializationSettings initializationSettingsIOS =
+      DarwinInitializationSettings(
+    requestSoundPermission: false,
+    requestBadgePermission: false,
+    requestAlertPermission: false,
+    onDidReceiveLocalNotification:
+        (int id, String? title, String? body, String? payload) async {
+      // Handle iOS 9 and below local notifications here
+    },
+  );
 
-  if (Platform.isIOS || Platform.isAndroid) {
-    await flutterLocalNotificationsPlugin.initialize(
-      const InitializationSettings(
-        iOS: DarwinInitializationSettings(),
-        android: AndroidInitializationSettings('ic_bg_service_small'),
-      ),
-    );
+  final InitializationSettings initializationSettings = InitializationSettings(
+    android: const AndroidInitializationSettings('ic_bg_service_small'),
+    iOS: initializationSettingsIOS,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    onDidReceiveNotificationResponse: (NotificationResponse response) async {
+      // Handle notification response here
+    },
+  );
+
+  if (Platform.isAndroid) {
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
   }
 
-  await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(channel);
+  if (Platform.isIOS) {
+    await _requestIOSPermissions();
+  }
 
   await service.configure(
     androidConfiguration: AndroidConfiguration(
-      // this will be executed when app is in foreground or background in separated isolate
       onStart: onStart,
-
-      // auto start service
       autoStart: true,
       isForegroundMode: true,
-
       notificationChannelId: 'my_foreground',
       initialNotificationTitle: 'AWESOME SERVICE',
       initialNotificationContent: 'Initializing',
       foregroundServiceNotificationId: 888,
-      foregroundServiceTypes: [AndroidForegroundType.mediaPlayback],
     ),
     iosConfiguration: IosConfiguration(
-      // auto start service
       autoStart: true,
-
-      // this will be executed when app is in foreground in separated isolate
       onForeground: onStart,
-
-      // you have to enable background fetch capability on xcode project
       onBackground: onIosBackground,
     ),
   );
+
+  debugPrint('Service initialized');
 }
 
-// to ensure this is executed
-// run app from xcode, then from xcode menu, select Simulate Background Fetch
+Future<void> _requestIOSPermissions() async {
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin>()
+      ?.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+}
 
 @pragma('vm:entry-point')
 Future<bool> onIosBackground(ServiceInstance service) async {
@@ -85,40 +103,13 @@ Future<bool> onIosBackground(ServiceInstance service) async {
   log.add(DateTime.now().toIso8601String());
   await preferences.setStringList('log', log);
 
+  debugPrint('iOS background task executed');
   return true;
 }
 
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
-
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
-
-  // Initialize the notification plugin
-  const AndroidInitializationSettings initializationSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-  const DarwinInitializationSettings initializationSettingsIOS =
-      DarwinInitializationSettings();
-  const InitializationSettings initializationSettings = InitializationSettings(
-    android: initializationSettingsAndroid,
-    iOS: initializationSettingsIOS,
-  );
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
-
-  // Create a notification channel for Android
-  const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'my_foreground',
-    'MY FOREGROUND SERVICE',
-    description: 'This channel is used for important notifications.',
-    importance: Importance.low,
-    playSound: false,
-  );
-
-  await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(channel);
 
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
@@ -128,24 +119,24 @@ void onStart(ServiceInstance service) async {
       service.setAsBackgroundService();
     });
   }
+
   service.on('stopService').listen((event) {
     service.stopSelf();
   });
 
   // Show the initial notification
-  await _showNotification(
-      flutterLocalNotificationsPlugin, channel, 'Service started');
+  await _showNotification('Service started');
 
   // Update the notification every second
   Timer.periodic(const Duration(seconds: 1), (timer) async {
     if (service is AndroidServiceInstance) {
       if (await service.isForegroundService()) {
-        await _showNotification(flutterLocalNotificationsPlugin, channel,
-            'Updated at ${DateTime.now().toString()}');
+        await _showNotification('Updated at ${DateTime.now().toString()}');
       }
     }
 
-    debugPrint('FLUTTER BACKGROUND SERVICE: ${DateTime.now()}');
+    debugPrint(
+        'FLUTTER BACKGROUND SERVICE: ${DateTime.now()}, tick: ${timer.tick}');
 
     service.invoke(
       'update',
@@ -156,27 +147,42 @@ void onStart(ServiceInstance service) async {
   });
 }
 
-Future<void> _showNotification(
-    FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin,
-    AndroidNotificationChannel channel,
-    String content) async {
-  await flutterLocalNotificationsPlugin.show(
-    888,
-    'My Timer',
-    content,
-    NotificationDetails(
-      android: AndroidNotificationDetails(
-        channel.id,
-        channel.name,
-        channelDescription: channel.description,
-        icon: '@mipmap/ic_launcher',
-        ongoing: true,
-        playSound: false,
-        enableVibration: false,
-      ),
-      iOS: const DarwinNotificationDetails(),
-    ),
+Future<void> _showNotification(String content) async {
+  const AndroidNotificationDetails androidPlatformChannelSpecifics =
+      AndroidNotificationDetails(
+    'my_foreground',
+    'MY FOREGROUND SERVICE',
+    channelDescription: 'This channel is used for important notifications.',
+    importance: Importance.high,
+    priority: Priority.high,
+    playSound: false,
+    onlyAlertOnce: true,
+    enableVibration: true,
   );
+
+  const DarwinNotificationDetails iOSPlatformChannelSpecifics =
+      DarwinNotificationDetails(
+    presentAlert: false,
+    presentBadge: false,
+    presentSound: false,
+  );
+
+  const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    android: androidPlatformChannelSpecifics,
+    iOS: iOSPlatformChannelSpecifics,
+  );
+
+  try {
+    await flutterLocalNotificationsPlugin.show(
+      888,
+      'My Timer',
+      content,
+      platformChannelSpecifics,
+    );
+    debugPrint('Notification shown: $content');
+  } catch (e) {
+    debugPrint('Error showing notification: $e');
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -232,13 +238,18 @@ class _MyAppState extends State<MyApp> {
               onPressed: () async {
                 final service = FlutterBackgroundService();
                 var isRunning = await service.isRunning();
-                isRunning
-                    ? service.invoke("stopService")
-                    : service.startService();
+                if (isRunning) {
+                  service.invoke("stopService");
+                } else {
+                  service.startService();
+                }
 
-                setState(() {
-                  text = isRunning ? 'Start Service' : 'Stop Service';
-                });
+                if (!isRunning) {
+                  text = 'Stop Service';
+                } else {
+                  text = 'Start Service';
+                }
+                setState(() {});
               },
             ),
             const Expanded(
