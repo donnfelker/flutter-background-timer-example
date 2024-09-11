@@ -98,8 +98,12 @@ void onStart(ServiceInstance service) async {
   // Initialize the notification plugin
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
-  const InitializationSettings initializationSettings =
-      InitializationSettings(android: initializationSettingsAndroid);
+  const DarwinInitializationSettings initializationSettingsIOS =
+      DarwinInitializationSettings();
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+    iOS: initializationSettingsIOS,
+  );
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
   // Create a notification channel for Android
@@ -170,6 +174,7 @@ Future<void> _showNotification(
         playSound: false,
         enableVibration: false,
       ),
+      iOS: const DarwinNotificationDetails(),
     ),
   );
 }
