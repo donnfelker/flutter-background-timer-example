@@ -2,17 +2,21 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:soundpool/soundpool.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await initializeService();
   runApp(const MyApp());
 }
@@ -111,6 +115,37 @@ Future<bool> onIosBackground(ServiceInstance service) async {
 void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
 
+  final Soundpool soundpool = Soundpool.fromOptions(
+    options: const SoundpoolOptions(
+      streamType: StreamType.alarm,
+    ),
+  );
+
+  int shortSoundId = await soundpool
+      .load(await rootBundle.load('assets/sounds/beep1_short.wav'));
+  int longSoundId = await soundpool
+      .load(await rootBundle.load('assets/sounds/beep1_long.wav'));
+
+  // Set up audio session
+  final AudioSession session = await AudioSession.instance;
+  await session.configure(
+    AudioSessionConfiguration(
+      androidAudioAttributes: const AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.sonification,
+          usage: AndroidAudioUsage.alarm),
+      androidAudioFocusGainType: AndroidAudioFocusGainType.gainTransientMayDuck,
+      androidWillPauseWhenDucked: false,
+      avAudioSessionCategory: AVAudioSessionCategory.playback,
+      avAudioSessionCategoryOptions:
+          AVAudioSessionCategoryOptions.mixWithOthers |
+              AVAudioSessionCategoryOptions.duckOthers,
+      avAudioSessionMode: AVAudioSessionMode.defaultMode,
+      avAudioSessionRouteSharingPolicy:
+          AVAudioSessionRouteSharingPolicy.defaultPolicy,
+      avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+    ),
+  );
+
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
       service.setAsForegroundService();
@@ -137,6 +172,23 @@ void onStart(ServiceInstance service) async {
 
     debugPrint(
         'FLUTTER BACKGROUND SERVICE: ${DateTime.now()}, tick: ${timer.tick}');
+
+    // Start session a second before starting sound
+    if (timer.tick % 10 == 6) {
+      await session.setActive(true);
+    }
+
+    // Turn off session a second after stopping sound
+    if (timer.tick % 10 == 1) {
+      await session.setActive(false);
+    }
+
+    // Check if the current tick should trigger a beep
+    if (timer.tick % 10 == 7 || timer.tick % 10 == 8 || timer.tick % 10 == 9) {
+      await soundpool.play(shortSoundId);
+    } else if (timer.tick % 10 == 0) {
+      await soundpool.play(longSoundId);
+    }
 
     service.invoke(
       'update',
